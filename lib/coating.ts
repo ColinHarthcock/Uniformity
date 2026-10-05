@@ -2,39 +2,51 @@
  * Thickness of a coating on an optic in a planetary rotation system.
  *
  * The optic is centered on the planet. Its rim lies on the sun, in z = 0,
- * facing up, until the sun is tilted. The optic control is focal length.
- * Zero is flat. Positive focal length is converging: the center is farther
- * from the target than the rim. Negative is diverging. The sphere radius
- * is R = −2f.
+ * facing up, until the sun is tilted. The optic control is signed sag.
+ * Zero is flat. Positive is a convex face toward the target (center closer
+ * than the rim — thicker coat at the center). Negative is concave toward
+ * the target (center farther — thicker coat at the edge). The sphere
+ * radius follows from the sag and the optic diameter. Closer to the target
+ * means thicker coating.
  * The planets are attached to the sun,
  * so the sun angle is their angle to the sputtered plume. There is no
- * second, local tilt. Zero leaves the planets square to a downward beam.
- * Positive drops the side of the sun under the target. The fixture limit
- * on that angle is ±10°. The target hangs above. Throw distance H is the
- * target-to-part distance. The target center is at (offset, 0, H) and, at
- * target tilt 0, faces straight down.
+ * second, local tilt. Zero leaves the planets level, faces up. Positive
+ * drops the side of the sun under the target. The fixture limit on that
+ * angle is ±10°. The target hangs above. Throw distance H is the height of
+ * the target center above the rim plane. The target center is at
+ * (offset, 0, H).
+ *
+ * Ion-beam leave law follows VacCoat’s IBS sketch: the ion arrow and the
+ * coat arrow are roughly mirror images about the plate normal. With a 45°
+ * ion beam the preferred leave axis is about 45° from the normal, on the
+ * side opposite the gun — not along the normal. The default plate aim is
+ * −45° (normal tipped toward the outboard gun) so that specular leave
+ * points straight down onto the sun plane. The gun sits outboard at the
+ * target height and shoots inward; the flux meets the face at 45°. Each
+ * patch emits a cosine about that preferred leave axis (plume sharpness),
+ * weighted by how many ions hit it. Cosine-about-normal is not the IBS
+ * leave law.
  *
  * For ion-beam sputtering the 16 cm size is the ion beam, not the sputtered
  * spot. The beam is flat through most of its radius and falls off at the
- * edge, then hits the target at 45° to the target normal. That paints an
- * ellipse. The long axis is the beam diameter divided by cos(45°) and points
- * along the sun radius. Each patch emits a cosine about the target normal,
- * weighted by how many ions hit it. A beam diameter of 0 is a point source.
+ * edge. The footprint is an ellipse. The long axis is the beam diameter
+ * divided by cos(45°) and points along the sun radius. A beam diameter of
+ * 0 is a point source (electron-beam pocket) and keeps leave along the
+ * plate normal.
  *
- * The target also rocks ±3° about that downward aim, in the same plane as
- * the target tilt. The gun stays fixed, so the ion angle swings with the
- * face. Thickness is the equal-time average over that swing.
+ * The target also rocks ±3° about that plate aim, in the same plane as the
+ * target tilt. The gun stays fixed, so the ion angle swings with the face.
+ * Thickness is the equal-time average over that swing.
  *
  * The planet keeps orbiting the whole time. Sun angle is the tilt of the
- * whole sun, and of the planets fixed to it, relative to that downward
- * sputter.
+ * whole sun, and of the planets fixed to it.
  *
  * A point on the planet at orbit angle θ is
  *   planet center + (r cos ψ, r sin ψ, 0)
  * with ψ = −θ × spins per orbit, so the planet spins opposite its orbit.
  *
  * Each emitter contributes (cos α)^n × (cos β) / d^2 × area.
- * cos α is the angle off the target normal (how the atom leaves).
+ * cos α is the angle off the preferred leave axis (how the atom leaves).
  * cos β is the angle off the part normal (how it arrives).
  * Either cosine at or below 0 contributes nothing.
  *
@@ -50,11 +62,28 @@ const CLOSURE_TOLERANCE = 1e-4;
 const BEAM_RINGS = 8;
 const BEAM_ANGLES = 12;
 
-/** 16 cm ion-beam diameter, rounded to the tenth of an inch this app uses. */
-export const IBS_SOURCE_DIAMETER_IN = 6.3;
+/** Millimeters per inch — lengths in this module are millimeters. */
+export const MM_PER_IN = 25.4;
 
-/** Ion beam vs target normal. Not the target tilt and not the sun angle. */
+/** 160 mm (16 cm) ion-beam diameter, the published source size. */
+export const IBS_SOURCE_DIAMETER_MM = 160;
+
+/** @deprecated Use IBS_SOURCE_DIAMETER_MM. */
+export const IBS_SOURCE_DIAMETER_IN = IBS_SOURCE_DIAMETER_MM;
+
+/**
+ * Ion beam vs the plate normal, in degrees. At the default IBS aim the gun
+ * sits outboard at target height and the flux meets the face at 45°.
+ */
 export const ION_INCIDENCE_DEG = 45;
+
+/**
+ * Default IBS plate aim, in degrees from face-down. Negative tips the
+ * normal toward the outboard gun so the specular leave axis (45° from the
+ * normal, opposite the ion) points straight down onto the parts — the
+ * VacCoat IBS layout.
+ */
+export const IBS_AIM_TILT_DEG = -ION_INCIDENCE_DEG;
 
 /** Fixture limit on the sun angle, the planets' angle to the plume. */
 export const PLANET_AOI_LIMIT_DEG = 10;
@@ -76,33 +105,40 @@ export const BEAM_FLAT_FRACTION = 0.75;
 export type ErosionAxis = "radial" | "tangential";
 
 export const METHOD_SHARPNESS = {
-  ibs: 1,
+  ibs: 2,
   ebeam: 2,
 } as const;
 
 export const METHOD_TARGET_DIAMETER = {
-  ibs: IBS_SOURCE_DIAMETER_IN,
+  ibs: IBS_SOURCE_DIAMETER_MM,
   ebeam: 0,
 } as const;
 
 export type CoatingMethod = keyof typeof METHOD_SHARPNESS;
 
+/** Default chamber geometry. All lengths are millimeters. */
 export const DEFAULT_COATING = {
   method: "ibs" as CoatingMethod,
-  throwDistance: 12,
+  throwDistance: 304.8,
   sharpness: METHOD_SHARPNESS.ibs,
-  partDiameter: 8,
-  planetDiameter: 8,
-  sunDiameter: 20,
-  orbitRadius: 6,
+  partDiameter: 203.2,
+  planetDiameter: 203.2,
+  sunDiameter: 508,
+  orbitRadius: 152.4,
   spinRatio: 20,
-  sourceOffset: 12,
+  sourceOffset: 304.8,
   targetDiameter: METHOD_TARGET_DIAMETER.ibs,
-  targetTiltDeg: 0,
+  targetTiltDeg: IBS_AIM_TILT_DEG,
   targetOscillationDeg: TARGET_OSCILLATION_DEG,
   sunAngleDeg: 0,
-  focalLength: 0,
+  sag: 0,
 };
+
+/** Default plate aim for each coating method. */
+export const METHOD_TARGET_TILT = {
+  ibs: IBS_AIM_TILT_DEG,
+  ebeam: 0,
+} as const;
 
 export type CoatingInputs = {
   throwDistance: number;
@@ -116,7 +152,7 @@ export type CoatingInputs = {
   /** Half-range of the target rock, in degrees. 0 holds the target still. */
   targetOscillationDeg?: number;
   /**
-   * Tilt of the sun relative to the downward sputter, in degrees.
+   * Tilt of the sun, in degrees. 0 leaves the planets level, faces up.
    * The planets are fixed to the sun, so this is also their angle to the plume.
    */
   sunAngleDeg?: number;
@@ -127,16 +163,17 @@ export type CoatingInputs = {
   /** Stationary plate between the part and the target. Omitted means no mask. */
   mask?: UniformityMask | null;
   /**
-   * Focal length of the coated face, in inches. 0 is plano, not a sphere.
-   * Positive is converging (center farther from the target). Negative is
-   * diverging. The sphere radius is R = −2f.
+   * Signed sag of the coated face, in millimeters. 0 is plano. Positive is
+   * convex toward the target (center closer). Negative is concave toward the
+   * target (center farther). The steepest surface is a hemisphere, so |sag|
+   * cannot exceed half the optic diameter.
    */
-  focalLength?: number;
+  sag?: number;
 };
 
 /**
  * Metal finger in the mask plane, symmetric about the line from the sun
- * to the target. radiiIn are distances from the sun center, in inches.
+ * to the target. radiiIn are distances from the sun center, in millimeters.
  * halfAngleDeg is how far the metal extends either side of that line.
  * Outside the first and last radius the plate is open.
  */
@@ -175,7 +212,7 @@ export type Emitter = {
   area: number;
 };
 
-/** Planet center when the planet sits on the sun plate, in inches. */
+/** Planet center when the planet sits on the sun plate, in millimeters. */
 export function plateOrbitRadius(
   sunDiameter: number,
   planetDiameter: number,
@@ -183,7 +220,7 @@ export function plateOrbitRadius(
   return Math.max(0, (sunDiameter - planetDiameter) / 2);
 }
 
-/** Orbit radius when the sun and planet gears mesh on the outside, in inches. */
+/** Orbit radius when the sun and planet gears mesh on the outside, in millimeters. */
 export function gearMeshOrbitRadius(
   sunDiameter: number,
   planetDiameter: number,
@@ -224,6 +261,35 @@ export function pointFlux(
 }
 
 /**
+ * Half-angle of the plume lobe for cartoons, in radians: the angle from the
+ * preferred leave axis out to where cos^sharpness has fallen to half.
+ * Sharpness 0 (flat) is a full hemisphere.
+ */
+export function plumeHalfAngleRad(sharpness: number): number {
+  if (!(sharpness > 1e-9)) return Math.PI / 2;
+  const cosHalf = Math.pow(0.5, 1 / sharpness);
+  return Math.acos(Math.min(1, Math.max(0, cosHalf)));
+}
+
+/**
+ * Radius of the plume footprint on a plane a throw distance below the source,
+ * using the half-max angle from plumeHalfAngleRad. Capped so a flat plume
+ * does not run off to infinity in the cartoon.
+ */
+export function plumeFootprintRadius(
+  throwDistance: number,
+  sharpness: number,
+  capMultiple = 2,
+): number {
+  const height = Math.max(0, throwDistance);
+  if (!(height > 0)) return 0;
+  const half = plumeHalfAngleRad(sharpness);
+  const cap = height * Math.max(0.5, capMultiple);
+  if (half >= Math.PI / 2 - 1e-6) return cap;
+  return Math.min(cap, height * Math.tan(half));
+}
+
+/**
  * Ion current across a round, collimated beam. 1 on the flat top, 0 at the
  * edge and outside. The join is smooth: the cosine falloff has zero slope
  * at both ends.
@@ -253,15 +319,67 @@ export function erosionEllipse(
   return { shortRadius, longRadius, incidenceDeg };
 }
 
+/** Unit normal of the sputtered face. Tilt 0 is straight down. Positive tips inward toward the sun. */
+export function plateNormal(tiltDeg: number): {
+  x: number;
+  y: number;
+  z: number;
+} {
+  const tilt = (tiltDeg * Math.PI) / 180;
+  return {
+    x: -Math.sin(tilt),
+    y: 0,
+    z: -Math.cos(tilt),
+  };
+}
+
 /**
- * Emitters on the target. Beam diameter 0 is a single point of weight 1, so
- * it matches pointFlux when the target faces straight down.
+ * Ion velocity for a gun that meets the plate at incidenceDeg when the plate
+ * is at aimTiltDeg. The gun sits on the outboard (+x) side. At aim −45° and
+ * 45° incidence the beam is horizontal; at aim 0° it climbs into a face-down
+ * plate from below and outboard.
+ */
+export function ionBeamDirection(
+  aimTiltDeg: number,
+  incidenceDeg = ION_INCIDENCE_DEG,
+): { x: number; y: number; z: number } {
+  const n = plateNormal(aimTiltDeg);
+  const aim = (aimTiltDeg * Math.PI) / 180;
+  const tOut = { x: Math.cos(aim), y: 0, z: -Math.sin(aim) };
+  const alpha = (incidenceDeg * Math.PI) / 180;
+  const toGunX = Math.cos(alpha) * n.x + Math.sin(alpha) * tOut.x;
+  const toGunZ = Math.cos(alpha) * n.z + Math.sin(alpha) * tOut.z;
+  const length = Math.hypot(toGunX, toGunZ) || 1;
+  return { x: -toGunX / length, y: 0, z: -toGunZ / length };
+}
+
+/** Mirror of the ion velocity about the plate normal — the preferred IBS leave axis. */
+export function specularLeaveDirection(
+  ionDir: { x: number; y: number; z: number },
+  normal: { x: number; y: number; z: number },
+): { x: number; y: number; z: number } {
+  const dot = ionDir.x * normal.x + ionDir.y * normal.y + ionDir.z * normal.z;
+  const rx = ionDir.x - 2 * dot * normal.x;
+  const ry = ionDir.y - 2 * dot * normal.y;
+  const rz = ionDir.z - 2 * dot * normal.z;
+  const length = Math.hypot(rx, ry, rz) || 1;
+  return { x: rx / length, y: ry / length, z: rz / length };
+}
+
+/**
+ * Emitters on the target. Beam diameter 0 is a single point of weight 1 and
+ * leaves along the plate normal (electron-beam pocket). A positive diameter
+ * is the ion beam: patches sit on the 45° ellipse and leave about the
+ * specular axis for a gun fixed at aimTiltDeg with 45° incidence on that aim.
  *
- * A positive diameter is the ion-beam diameter. Patches are equal areas in
- * the round beam, placed on the 45° ellipse, and weighted by the local ion
- * current. Yield is left at 1 because a constant yield cancels in relative
- * thickness. The long axis follows erosionAxis: "radial" (along the sun
- * radius) or "tangential".
+ * Tilt 0 faces straight down. The default IBS aim (−45°) tips the normal
+ * toward the gun so specular leave points straight down. Positive tilt from
+ * face-down tips the normal inward toward the sun.
+ *
+ * Patches are equal areas in the round beam, placed on the ellipse, and
+ * weighted by the local ion current. Yield is left at 1 because a constant
+ * yield cancels in relative thickness. The long axis follows erosionAxis:
+ * "radial" (along the sun radius) or "tangential".
  */
 export function targetEmitters(
   offset: number,
@@ -270,22 +388,23 @@ export function targetEmitters(
   tiltDeg: number,
   longAxis: ErosionAxis = "radial",
   incidenceDeg = ION_INCIDENCE_DEG,
+  aimTiltDeg?: number,
 ): Emitter[] {
-  const tilt = (tiltDeg * Math.PI) / 180;
-  const normal = {
-    x: -Math.sin(tilt),
-    y: 0,
-    z: -Math.cos(tilt),
-  };
+  const normal = plateNormal(tiltDeg);
+  const aim = aimTiltDeg ?? tiltDeg;
+  const leave =
+    beamDiameter > 0
+      ? specularLeaveDirection(ionBeamDirection(aim, ION_INCIDENCE_DEG), normal)
+      : normal;
   if (!(beamDiameter > 0)) {
     return [
       {
         x: offset,
         y: 0,
         z: throwDistance,
-        nx: normal.x,
-        ny: normal.y,
-        nz: normal.z,
+        nx: leave.x,
+        ny: leave.y,
+        nz: leave.z,
         area: 1,
       },
     ];
@@ -294,8 +413,8 @@ export function targetEmitters(
   const { shortRadius, longRadius } = erosionEllipse(beamDiameter, incidenceDeg);
   const count = BEAM_RINGS * BEAM_ANGLES;
   const beamArea = (Math.PI * shortRadius * shortRadius) / count;
-  const cosTilt = Math.cos(tilt);
-  const sinTilt = Math.sin(tilt);
+  const cosTilt = Math.cos((tiltDeg * Math.PI) / 180);
+  const sinTilt = Math.sin((tiltDeg * Math.PI) / 180);
   const emitters: Emitter[] = [];
   for (let ring = 0; ring < BEAM_RINGS; ring++) {
     const rho = Math.sqrt((shortRadius * shortRadius * (ring + 0.5)) / BEAM_RINGS);
@@ -314,9 +433,9 @@ export function targetEmitters(
         x: offset + localX * cosTilt,
         y: localY,
         z: throwDistance - localX * sinTilt,
-        nx: normal.x,
-        ny: normal.y,
-        nz: normal.z,
+        nx: leave.x,
+        ny: leave.y,
+        nz: leave.z,
         area: current * beamArea,
       });
     }
@@ -347,8 +466,9 @@ export function targetOscillationTilts(
 
 /**
  * Time average of the target rock. Each stop gets equal time. The ion gun
- * stays fixed, so a face that has swung by delta degrees is hit at
- * 45° − delta. Amplitude 0 is one still target at the aim, still at 45°.
+ * stays fixed at the aim: outboard, meeting the aimed face at 45°. Rocking
+ * the plate changes the ion angle on the face and swings the specular leave
+ * axis with it. Amplitude 0 is one still target at the aim.
  */
 export function oscillatedTargetEmitters(
   offset: number,
@@ -367,7 +487,8 @@ export function oscillatedTargetEmitters(
       beamDiameter,
       tilt,
       longAxis,
-      rocking ? ION_INCIDENCE_DEG - (tilt - tiltDeg) : ION_INCIDENCE_DEG,
+      rocking ? ION_INCIDENCE_DEG + (tilt - tiltDeg) : ION_INCIDENCE_DEG,
+      tiltDeg,
     ),
   );
   const scale = 1 / groups.length;
@@ -399,7 +520,7 @@ export function maskHalfAngleRadians(mask: UniformityMask, rho: number): number 
 
 /**
  * True when the straight ray from a part point to an emitter crosses metal.
- * The plate is parallel to the coated face, offsetIn inches toward the target.
+ * The plate is parallel to the coated face, offsetIn millimeters toward the target.
  */
 export function maskBlocksRay(
   mask: UniformityMask,
@@ -437,6 +558,11 @@ export function maskBlocksRay(
  * A point that faces away from an emitter, or that the target cannot see,
  * gets nothing from that emitter. A mask blocks an emitter whose ray
  * crosses the metal.
+ *
+ * When angleAt is set, leave and arrive cosines use that point (the flat
+ * planet pose). Distance still uses (x, y, z). That keeps optic sag from
+ * steering a raised center off a sharp plume lobe — curvature then only
+ * changes throw, so closer glass stays thicker.
  */
 export function receivedFlux(
   x: number,
@@ -448,7 +574,11 @@ export function receivedFlux(
   ny = 0,
   nz = 1,
   mask?: UniformityMask | null,
+  angleAt?: { x: number; y: number; z: number } | null,
 ): number {
+  const ax = angleAt?.x ?? x;
+  const ay = angleAt?.y ?? y;
+  const az = angleAt?.z ?? z;
   let sum = 0;
   for (let index = 0; index < emitters.length; index++) {
     const emitter = emitters[index]!;
@@ -458,17 +588,21 @@ export function receivedFlux(
     ) {
       continue;
     }
+    const adx = ax - emitter.x;
+    const ady = ay - emitter.y;
+    const adz = az - emitter.z;
+    const angleDistance = Math.sqrt(adx * adx + ady * ady + adz * adz);
+    if (!(angleDistance > 0)) continue;
+    const cosLeave =
+      (emitter.nx * adx + emitter.ny * ady + emitter.nz * adz) / angleDistance;
+    const cosArrive =
+      (nx * -adx + ny * -ady + nz * -adz) / angleDistance;
+    if (cosLeave <= 0 || cosArrive <= 0) continue;
     const dx = x - emitter.x;
     const dy = y - emitter.y;
     const dz = z - emitter.z;
     const distanceSquared = dx * dx + dy * dy + dz * dz;
-    const distance = Math.sqrt(distanceSquared);
-    if (!(distance > 0)) continue;
-    const cosLeave =
-      (emitter.nx * dx + emitter.ny * dy + emitter.nz * dz) / distance;
-    const cosArrive =
-      (nx * -dx + ny * -dy + nz * -dz) / distance;
-    if (cosLeave <= 0 || cosArrive <= 0) continue;
+    if (!(distanceSquared > 0)) continue;
     sum +=
       Math.pow(cosLeave, sharpness) * (cosArrive / distanceSquared) * emitter.area;
   }
@@ -517,7 +651,7 @@ export function planetPose(
 }
 
 /**
- * Turn the sun relative to a downward sputter beam.
+ * Turn the sun. Zero leaves the planets level.
  * The axis is across the line from the sun to the target. Zero leaves the
  * sun square to that beam. Positive drops the side of the sun under the target.
  */
@@ -536,22 +670,31 @@ export function applySunAngle(pose: PlanetPose, sunAngleDeg: number): PlanetPose
   };
 }
 
-/**
- * Sphere radius for a mirror focal length, in inches.
- * Focal length 0 is a flat optic. It is not sent through R = −2f.
- */
-export function radiusFromFocalLength(focalLength: number): number {
-  if (!Number.isFinite(focalLength) || focalLength === 0) return 0;
-  return -2 * focalLength;
+/** Largest |sag| that still makes a sphere on this optic: a hemisphere. */
+export function maxOpticSag(diameter: number): number {
+  return Math.max(0, diameter) / 2;
 }
 
 /**
- * Signed sag of a spherical optic, in inches. Positive means the center
+ * Sphere radius for a signed sag, in millimeters.
+ * Sag 0 is flat. Positive sag (convex toward the target) gives positive R.
+ * |sag| above a hemisphere returns NaN.
+ */
+export function radiusFromSag(diameter: number, sag: number): number {
+  if (!Number.isFinite(sag) || sag === 0) return 0;
+  const half = maxOpticSag(diameter);
+  const absSag = Math.abs(sag);
+  if (!(half > 0) || absSag > half + 1e-9) return Number.NaN;
+  return Math.sign(sag) * ((half * half + absSag * absSag) / (2 * absSag));
+}
+
+/**
+ * Signed sag of a spherical optic, in millimeters. Positive means the center
  * is closer to the target than the rim. Zero is flat. NaN means the
  * sphere cannot span the optic.
  */
 export function opticSag(diameter: number, radiusOfCurvature: number): number {
-  const half = Math.max(0, diameter) / 2;
+  const half = maxOpticSag(diameter);
   const radius = radiusOfCurvature;
   if (!Number.isFinite(radius) || radius === 0 || !(half > 0)) return 0;
   if (Math.abs(radius) + 1e-9 < half) return Number.NaN;
@@ -564,6 +707,12 @@ export function opticSag(diameter: number, radiusOfCurvature: number): number {
 /** How far the glass nearest the target stands above the rim plane. */
 export function opticHigh(diameter: number, radiusOfCurvature: number): number {
   const sag = opticSag(diameter, radiusOfCurvature);
+  if (!Number.isFinite(sag)) return 0;
+  return Math.max(0, sag);
+}
+
+/** How far the glass nearest the target stands above the rim plane, from sag. */
+export function opticHighFromSag(sag: number): number {
   if (!Number.isFinite(sag)) return 0;
   return Math.max(0, sag);
 }
@@ -599,27 +748,35 @@ export function opticSurface(
   };
 }
 
-export function describeOpticSag(diameter: number, focalLength: number): string {
-  if (!Number.isFinite(focalLength) || focalLength === 0) {
-    return "Sag is 0. Focal length 0 is a flat optic.";
+export function describeOpticSag(diameter: number, sag: number): string {
+  if (!Number.isFinite(sag) || sag === 0) {
+    return "Sag is 0. That is a flat optic.";
   }
-  const sag = opticSag(diameter, radiusFromFocalLength(focalLength));
-  const signed = `${focalLength > 0 ? "+" : "−"}${Math.abs(focalLength).toFixed(1)}`;
-  if (!Number.isFinite(sag)) {
-    const shortest = Math.max(0, diameter) / 4;
-    return `A focal length of ${signed} in cannot cover a ${diameter.toFixed(1)} in optic. The shortest focal length that still reaches the rim is ${shortest.toFixed(1)} in, a hemisphere. A shorter focal length does not make a surface.`;
+  const maxSag = maxOpticSag(diameter);
+  const signed = `${sag > 0 ? "+" : "−"}${Math.abs(sag).toFixed(Math.abs(sag) < 1 ? 2 : 1)}`;
+  if (!(maxSag > 0) || Math.abs(sag) > maxSag + 1e-9) {
+    return `A sag of ${signed} mm cannot cover a ${diameter.toFixed(1)} mm optic. The steepest surface is a hemisphere, so the largest sag is ${maxSag.toFixed(1)} mm.`;
   }
-  const amount = Math.abs(sag);
-  const inches = amount < 0.1 ? amount.toFixed(3) : amount.toFixed(2);
-  if (sag < 0) {
-    return `Sag is ${inches} in at a focal length of ${signed} in. The surface is hollow toward the target, so the center is that much farther from the target than the rim.`;
+  const radius = radiusFromSag(diameter, sag);
+  const radiusText = Number.isFinite(radius)
+    ? Math.abs(radius).toFixed(Math.abs(radius) < 100 ? 1 : 0)
+    : "—";
+  if (sag > 0) {
+    return `Sag is ${signed} mm (sphere radius ${radiusText} mm). That is convex toward the target: the center is closer than the rim, so the coat runs thicker at the center.`;
   }
-  return `Sag is ${inches} in at a focal length of ${signed} in. The surface bulges toward the target, so the center is that much closer to the target than the rim.`;
+  return `Sag is ${signed} mm (sphere radius ${radiusText} mm). That is concave toward the target: the center is farther than the rim, so the coat runs thicker at the edge.`;
 }
 
 /**
  * Where one radius on the optic sits after spin, orbit, and sun tilt.
  * A flat optic matches the old planet pose exactly.
+ *
+ * Curvature only moves the point closer to or farther from the target
+ * (the sag in z). The coated-face normal stays the planet face after sun
+ * tilt, not the local sphere tip. Flux callers should take leave/arrive
+ * angles from the flat pose and distance from this curved pose, so a
+ * convex center (closer) stays thicker and a concave rim (closer) stays
+ * thicker even under a sharp plume.
  */
 export function coatedPose(
   theta: number,
@@ -634,19 +791,22 @@ export function coatedPose(
   const sag = opticSag(opticDiameter, radiusOfCurvature);
   if (!Number.isFinite(sag) || sag === 0) return applySunAngle(flat, sunAngleDeg);
   const surface = opticSurface(radius, opticDiameter, radiusOfCurvature);
-  let nx = 0;
-  let ny = 0;
-  if (radius > 1e-9) {
-    const cosTheta = Math.cos(theta);
-    const sinTheta = Math.sin(theta);
-    const phi = -theta * spinRatio - theta;
-    const ox = radius * Math.cos(phi) * cosTheta - radius * Math.sin(phi) * sinTheta;
-    const oy = radius * Math.cos(phi) * sinTheta + radius * Math.sin(phi) * cosTheta;
-    nx = surface.nRadial * (ox / radius);
-    ny = surface.nRadial * (oy / radius);
-  }
   return applySunAngle(
-    { x: flat.x, y: flat.y, z: surface.z, nx, ny, nz: surface.nZ },
+    { x: flat.x, y: flat.y, z: surface.z, nx: 0, ny: 0, nz: 1 },
+    sunAngleDeg,
+  );
+}
+
+/** Flat planet pose used for leave/arrive angles when the optic is curved. */
+export function flatCoatedPose(
+  theta: number,
+  radius: number,
+  orbitRadius: number,
+  spinRatio: number,
+  sunAngleDeg: number,
+): PlanetPose {
+  return applySunAngle(
+    planetPose(theta, radius, orbitRadius, spinRatio, 0),
     sunAngleDeg,
   );
 }
@@ -734,6 +894,13 @@ export function averageFluxOnRadius(input: {
   let sum = 0;
   for (let i = 0; i < steps; i++) {
     const theta = (Math.PI * 2 * orbits * i) / steps;
+    const flat = flatCoatedPose(
+      theta,
+      input.radius,
+      input.orbitRadius,
+      input.spinRatio,
+      sunAngleDeg,
+    );
     const point = coatedPose(
       theta,
       input.radius,
@@ -753,6 +920,7 @@ export function averageFluxOnRadius(input: {
       point.ny,
       point.nz,
       mask,
+      flat,
     );
   }
   return sum / steps;
@@ -823,7 +991,7 @@ export function thicknessProfile(input: CoatingInputs): ThicknessProfile {
   const targetOscillationDeg =
     input.targetOscillationDeg ?? DEFAULT_COATING.targetOscillationDeg;
   const sunAngleDeg = input.sunAngleDeg ?? 0;
-  const radiusOfCurvature = radiusFromFocalLength(input.focalLength ?? 0);
+  const radiusOfCurvature = radiusFromSag(input.partDiameter, input.sag ?? 0);
   const erosionAxis = input.erosionAxis ?? "radial";
   const mask = input.mask
     ? { ...input.mask, sunAngleDeg: input.mask.sunAngleDeg ?? sunAngleDeg }
@@ -871,6 +1039,7 @@ export function thicknessProfile(input: CoatingInputs): ThicknessProfile {
         radiusOfCurvature,
       }),
       stationaryFlux: (() => {
+        const flat = flatCoatedPose(0, radius, 0, 0, sunAngleDeg);
         const still = coatedPose(
           0,
           radius,
@@ -889,6 +1058,8 @@ export function thicknessProfile(input: CoatingInputs): ThicknessProfile {
           still.nx,
           still.ny,
           still.nz,
+          null,
+          flat,
         );
       })(),
     });
@@ -1108,17 +1279,9 @@ export function planetAngleSweep(input: CoatingInputs): PlanetAngleSweep {
 }
 
 export function profileToCsv(points: RadialSample[]): string {
-  const lines = [
-    "radius_in,planetary_relative_thickness,stationary_relative_thickness",
-  ];
+  const lines = ["radius_mm,planetary_relative_thickness"];
   for (const point of points) {
-    lines.push(
-      [
-        point.radius.toFixed(4),
-        point.planetary.toFixed(6),
-        point.stationary.toFixed(6),
-      ].join(","),
-    );
+    lines.push([point.radius.toFixed(4), point.planetary.toFixed(6)].join(","));
   }
   return `${lines.join("\n")}\n`;
 }

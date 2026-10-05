@@ -6,7 +6,7 @@ import { PLANET_AOI_LIMIT_DEG } from "@/lib/coating";
 
 type PlaySlidersProps = {
   distanceIn: number;
-  onDistance: (inches: number) => void;
+  onDistance: (mm: number) => void;
   gearing: number;
   onGearing: (turns: number) => void;
   sunAngleDeg: number;
@@ -90,8 +90,8 @@ export function PlaySliders({
         <CardTitle>Drag these</CardTitle>
         <CardDescription>
           The planets are attached to the sun, so the sun angle is their angle
-          to the sputtered plume. They keep circling. 0° is square to a
-          downward beam. Positive drops the side under the target. The fixture
+          to the sputtered plume. They keep circling. 0° leaves them level,
+          faces up. Positive drops the side under the target. The fixture
           stops at ±{PLANET_AOI_LIMIT_DEG}°.
         </CardDescription>
       </CardHeader>
@@ -100,12 +100,12 @@ export function PlaySliders({
           id="slider-distance"
           label="Distance from sun center"
           value={distanceIn}
-          display={`${distanceIn.toFixed(1)} in`}
+          display={`${distanceIn.toFixed(1)} mm`}
           min={0}
-          max={24}
-          step={0.1}
-          minLabel="0 in"
-          maxLabel="24 in"
+          max={609.6}
+          step={1}
+          minLabel="0 mm"
+          maxLabel="609.6 mm"
           onChange={onDistance}
         />
         <SliderRow

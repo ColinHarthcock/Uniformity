@@ -22,9 +22,11 @@ import {
   DEFAULT_COATING,
   METHOD_SHARPNESS,
   METHOD_TARGET_DIAMETER,
+  METHOD_TARGET_TILT,
   gearMeshOrbitRadius,
   gearSpinRatio,
   describeOpticSag,
+  maxOpticSag,
   erosionEllipse,
   PLANET_AOI_LIMIT_DEG,
   TARGET_OSCILLATION_DEG,
@@ -37,6 +39,7 @@ import {
   type PlanetAngleSweep,
   type ThicknessProfile,
 } from "@/lib/coating";
+import { APP_VERSION } from "@/lib/version";
 
 const methodItems = [
   { value: "ibs" as const, label: "Ion-beam sputtering" },
@@ -82,10 +85,10 @@ export function CoatingApp() {
     DEFAULT_COATING.targetOscillationDeg,
   );
   const [sunAngleDeg, setSunAngleDeg] = useState(DEFAULT_COATING.sunAngleDeg);
-  const [focalLength, setFocalLength] = useState(DEFAULT_COATING.focalLength);
+  const [sag, setSag] = useState(DEFAULT_COATING.sag);
   const [maskOffsetIn, setMaskOffsetIn] = useState<number | null>(null);
-  const onMaskOffset = useCallback((inches: number | null) => {
-    setMaskOffsetIn(inches);
+  const onMaskOffset = useCallback((mm: number | null) => {
+    setMaskOffsetIn(mm);
   }, []);
 
   const beamSpot = erosionEllipse(targetDiameter);
@@ -107,7 +110,7 @@ export function CoatingApp() {
       targetTiltDeg,
       targetOscillationDeg,
       sunAngleDeg,
-      focalLength,
+      sag,
     }),
     [
       throwDistance,
@@ -120,7 +123,7 @@ export function CoatingApp() {
       targetTiltDeg,
       targetOscillationDeg,
       sunAngleDeg,
-      focalLength,
+      sag,
     ],
   );
   const [settledCoating, setSettledCoating] = useState(liveCoating);
@@ -137,16 +140,18 @@ export function CoatingApp() {
   useEffect(() => {
     let cancelled = false;
     const timer = window.setTimeout(() => {
-      const profile = thicknessProfile(settledCoating);
-      if (!cancelled) setProfileState({ key: profileKey, profile });
+      const next = thicknessProfile(settledCoating);
+      if (!cancelled) setProfileState({ key: profileKey, profile: next });
     }, 0);
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
     };
   }, [settledCoating, profileKey]);
+  // Only the profile for the current inputs. A stale curve from the other
+  // sag sign must not keep showing the same before-mask ±%.
   const profile = profileState?.key === profileKey ? profileState.profile : null;
-  const shownProfile = profile ?? profileState?.profile ?? null;
+  const shownProfile = profile;
 
   const sweepInput = useMemo(
     () => ({
@@ -159,7 +164,7 @@ export function CoatingApp() {
       targetDiameter: settledCoating.targetDiameter,
       targetTiltDeg: settledCoating.targetTiltDeg,
       targetOscillationDeg: settledCoating.targetOscillationDeg,
-      focalLength: settledCoating.focalLength,
+      sag: settledCoating.sag,
     }),
     [settledCoating],
   );
@@ -213,10 +218,6 @@ export function CoatingApp() {
     shownProfile && Number.isFinite(shownProfile.planetaryVariationPercent)
       ? formatUniformity(shownProfile.planetaryVariationPercent)
       : null;
-  const stationaryText =
-    shownProfile && Number.isFinite(shownProfile.stationaryPlusMinusPercent)
-      ? formatUniformity(shownProfile.stationaryPlusMinusPercent)
-      : null;
   const sourceOverPart = sourcePassesOverPart(
     orbitRadius,
     sourceOffset,
@@ -249,9 +250,12 @@ export function CoatingApp() {
   }
 
   return (
-    <div className="min-h-full bg-background text-foreground">
+    <div className="flex min-h-full flex-col bg-background text-foreground">
+      <div className="bg-amber-100 px-4 py-2 text-center text-sm font-semibold tracking-wide text-amber-950 sm:text-base">
+        WARNING — work in progress
+      </div>
       <div className="h-1.5 bg-primary" aria-hidden="true" />
-      <main className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 py-5 sm:px-6 sm:py-8">
+      <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-4 px-4 py-5 sm:px-6 sm:py-8">
         <header className="max-w-3xl">
           <p className="text-sm font-medium text-primary">Planetary rotation</p>
           <h1 className="mt-1 text-2xl font-semibold tracking-tight text-balance sm:text-3xl">
@@ -260,8 +264,8 @@ export function CoatingApp() {
           <p className="mt-2 text-sm leading-relaxed text-muted-foreground sm:text-base">
             Set the coating method, the chamber, and the optic curve, then
             read how thick the coating is from the center out to the edge.
-            A focal length of 0 is a flat optic. The mask below is
-            designed for whatever curve is set.
+            A sag of 0 is a flat optic. The mask below is designed for
+            whatever curve is set.
           </p>
         </header>
 
@@ -269,7 +273,7 @@ export function CoatingApp() {
           <Card>
             <CardHeader>
               <CardTitle>Setup</CardTitle>
-              <CardDescription>Lengths are in inches.</CardDescription>
+              <CardDescription>Lengths are in millimeters.</CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-5">
               <div className="flex flex-col gap-2">
@@ -286,6 +290,7 @@ export function CoatingApp() {
                         setMethod(item.value);
                         setSharpness(METHOD_SHARPNESS[item.value]);
                         setTargetDiameter(METHOD_TARGET_DIAMETER[item.value]);
+                        setTargetTiltDeg(METHOD_TARGET_TILT[item.value]);
                       }}
                     >
                       {item.label}
@@ -293,25 +298,25 @@ export function CoatingApp() {
                   ))}
                 </div>
                 <p id="coating-method-hint" className="text-sm leading-snug text-muted-foreground">
-                  Ion-beam sputtering keeps a 16 cm flat-top beam hitting the target at 45°, with cosine emission from that elliptical spot. Electron-beam is a small melt pool, a point where the target sits, not that beam and not the ellipse. Switching sets the sharpness and the source size back to that method. Sharpness can still be edited afterward.
+                  Ion-beam sputtering aims the target like VacCoat’s IBS sketch: the plate is tipped −45° so the plate normal leans toward the outboard gun, the ion flux meets that face at 45°, and sputtered atoms leave about 45° from the normal on the opposite side — straight down onto the parts, not along the normal. The 16 cm flat-top beam paints the ellipse on that face. Electron-beam is a small melt pool, a point where the target sits, leaving along the plate normal with no ion ellipse. Switching sets the sharpness, source size, and plate aim back to that method. Sharpness can still be edited afterward.
                 </p>
               </div>
 
               <NumericControl
                 id="throw-distance"
                 label="Throw distance"
-                hint="Distance from the target down to the flat part. Spector does not publish this distance. A still part under the target gets more even as this grows, but the orbiting part can get worse for a while, because the target stays put sideways and a longer throw puts the planet path in a different part of the plume."
+                hint="Distance from the target center down to the flat part. Spector does not publish this distance. A still part under the target gets more even as this grows. The orbiting part does not: with the target 304.8 mm from the sun center, the flat ion-beam coat is most even near the 304.8 mm throw and least even near 508 mm, then improves again. A longer throw moves the planet path through a different part of the plume."
                 value={throwDistance}
-                min={2}
-                max={36}
-                step={0.1}
-                suffix="in"
+                min={50.8}
+                max={914.4}
+                step={1}
+                suffix="mm"
                 onChange={setThrowDistance}
               />
               <NumericControl
                 id="plume-sharpness"
                 label="Plume sharpness"
-                hint="1 is an even spray, the usual sputter pattern. Higher numbers bunch the spray along the direction the target faces. Ion-beam starts at 1. Electron-beam starts at 2."
+                hint="1 is an even spray around the preferred leave direction. Higher numbers bunch the spray along that axis. For ion-beam that axis is the specular leave (~45° from the plate normal, opposite the gun), not the normal itself. Ion-beam and electron-beam both start at 2; electron-beam leaves along the plate normal."
                 value={sharpness}
                 min={0}
                 max={30}
@@ -323,23 +328,27 @@ export function CoatingApp() {
                 label={method === "ibs" ? "Ion beam diameter" : "Melt pool"}
                 hint={
                   method === "ibs"
-                    ? `Diameter of the ion beam, not the sputtered spot. Starts at 6.3 in, the published 16 cm source. The beam is taken as flat through the inner three-quarters of its radius, then it falls smoothly to zero at the edge. That shape is a stand-in, not a measured Spector curve. At 45° to the target it paints an ellipse ${(beamSpot.longRadius * 2).toFixed(1)} in by ${(beamSpot.shortRadius * 2).toFixed(1)} in. The long axis points along the sun radius.`
+                    ? `Diameter of the ion beam, not the sputtered spot. Starts at 160 mm, the published 16 cm source. The beam is taken as flat through the inner three-quarters of its radius, then it falls smoothly to zero at the edge. That shape is a stand-in, not a measured Spector curve. At 45° to the target it paints an ellipse ${(beamSpot.longRadius * 2).toFixed(1)} mm by ${(beamSpot.shortRadius * 2).toFixed(1)} mm. The long axis points along the sun radius.`
                     : "Electron-beam starts at 0, a point, because the melted pool is small. Switching method resets this."
                 }
                 value={targetDiameter}
                 min={0}
-                max={20}
-                step={0.1}
-                suffix="in"
+                max={508}
+                step={1}
+                suffix="mm"
                 onChange={setTargetDiameter}
               />
               <NumericControl
                 id="target-tilt"
                 label="Target tilt"
-                hint="0° means the target faces straight down at the parts. The 45° figure is the ion beam hitting the target, which sets the ellipse. It is not this tilt."
+                hint={
+                  method === "ibs"
+                    ? "Starts at −45° from face-down: the plate normal tips toward the outboard gun so the specular coat leave aims straight down onto the parts (VacCoat IBS layout). The ion gun stays fixed for that aim and meets the face at 45°. Rocking swings about this aim. Tilting more positive tips the normal toward the sun and aims the coat inward."
+                    : "Starts at 0°, face-down. Electron-beam leaves along the plate normal. Positive tilt aims that normal inward, toward the sun."
+                }
                 value={targetTiltDeg}
-                min={-45}
-                max={45}
+                min={-80}
+                max={80}
                 step={1}
                 suffix="°"
                 onChange={setTargetTiltDeg}
@@ -347,7 +356,7 @@ export function CoatingApp() {
               <NumericControl
                 id="target-oscillation"
                 label="Target oscillation"
-                hint={`The target rocks this far either side of the target tilt while the part turns. Starts at ±${TARGET_OSCILLATION_DEG}° angle of incidence. The ion gun stays put, so the beam’s angle on the target swings by the same amount around 45°. Equal time at each angle. 0° holds the target still.`}
+                hint={`The target rocks this far either side of the plate aim while the part turns. Starts at ±${TARGET_OSCILLATION_DEG}°. The ion gun stays put, so the ion flux’s angle on the face swings by the same amount around 45°. Equal time at each angle. 0° holds the target still.`}
                 value={targetOscillationDeg}
                 min={0}
                 max={20}
@@ -360,35 +369,44 @@ export function CoatingApp() {
               <NumericControl
                 id="part-diameter"
                 label="Optic diameter"
-                hint="Diameter of the optic, centered on the planet. Sag is figured from this size and the focal length."
+                hint="Diameter of the optic, centered on the planet. The largest sag is a hemisphere: half this diameter."
                 value={partDiameter}
-                min={1}
-                max={24}
-                step={0.1}
-                suffix="in"
-                onChange={setPartDiameter}
+                min={25.4}
+                max={609.6}
+                step={1}
+                suffix="mm"
+                onChange={(next) => {
+                  setPartDiameter(next);
+                  const limit = maxOpticSag(next);
+                  setSag((current) => {
+                    if (!Number.isFinite(current)) return 0;
+                    return Number(
+                      Math.min(limit, Math.max(-limit, current)).toFixed(2),
+                    );
+                  });
+                }}
               />
               <NumericControl
-                id="focal-length"
-                label="Focal length"
-                hint="0 is flat, sag 0. Positive is converging: the surface is hollow toward the target, so the center is farther from the target than the rim. Negative is diverging: the surface bulges toward the target, so the center is closer. Focal length is half the radius, and the sign above is which way the surface bends. The steepest surface that still covers the optic is a hemisphere, so the shortest focal length is a quarter of the diameter. For an 8 in optic that is 2 in, with 4 in of sag. A focal length of 1 in cannot reach that rim."
-                value={focalLength}
-                min={-80}
-                max={80}
-                step={0.1}
-                suffix="in"
-                onChange={setFocalLength}
+                id="optic-sag"
+                label="Sag"
+                hint="Center height relative to the rim, in millimeters. 0 is flat. Positive is convex toward the target: the center is closer than the rim, so the coat is thicker at the center. Negative is concave toward the target: the center is farther, so the coat is thicker at the edge. Closer to the target means thicker coating. The steepest surface is a hemisphere, so |sag| cannot exceed half the optic diameter."
+                value={sag}
+                min={-maxOpticSag(partDiameter)}
+                max={maxOpticSag(partDiameter)}
+                step={0.25}
+                suffix="mm"
+                onChange={setSag}
               />
-              <p className="text-sm leading-snug text-foreground">{describeOpticSag(partDiameter, focalLength)}</p>
+              <p className="text-sm leading-snug text-foreground">{describeOpticSag(partDiameter, sag)}</p>
               <NumericControl
                 id="planet-diameter"
                 label="Planet diameter"
                 hint="Diameter of the planet that carries the part around the chamber."
                 value={planetDiameter}
-                min={1}
-                max={24}
-                step={0.1}
-                suffix="in"
+                min={25.4}
+                max={609.6}
+                step={1}
+                suffix="mm"
                 onChange={updatePlanet}
               />
               <NumericControl
@@ -396,10 +414,10 @@ export function CoatingApp() {
                 label="Sun diameter"
                 hint="Diameter of the plate the planets sit on."
                 value={sunDiameter}
-                min={4}
-                max={48}
-                step={0.1}
-                suffix="in"
+                min={101.6}
+                max={1219.2}
+                step={1}
+                suffix="mm"
                 onChange={updateSun}
               />
               <NumericControl
@@ -413,8 +431,8 @@ export function CoatingApp() {
                 value={orbitRadius}
                 min={0}
                 max={orbitMax}
-                step={0.1}
-                suffix="in"
+                step={1}
+                suffix="mm"
                 onChange={(next) => {
                   setOrbitManual(true);
                   applyDerivedOrbit(next);
@@ -431,7 +449,7 @@ export function CoatingApp() {
                         applyDerivedOrbit(plateOrbit);
                       }}
                     >
-                      Sit the planet on the plate ({plateOrbit.toFixed(1)} in)
+                      Sit the planet on the plate ({plateOrbit.toFixed(1)} mm)
                     </Button>
                   ) : null
                 }
@@ -478,14 +496,14 @@ export function CoatingApp() {
                 label="Distance from sun center"
                 hint={
                   offsetManual
-                    ? "How far the target sits from the center of the sun plane. Starts at 12 in, the Hf target. The throw is the height straight down to the parts, also 12 in."
+                    ? "How far the target sits from the center of the sun plane. Starts at 304.8 mm, the Hf target. The throw is the height straight down to the parts, also 304.8 mm."
                     : "Kept equal to the orbit, so the target hangs over the planet’s path."
                 }
                 value={sourceOffset}
-                min={-30}
-                max={30}
-                step={0.1}
-                suffix="in"
+                min={-762}
+                max={762}
+                step={1}
+                suffix="mm"
                 onChange={(next) => {
                   setOffsetManual(true);
                   setSourceOffset(next);
@@ -502,7 +520,7 @@ export function CoatingApp() {
                         setSourceOffset(orbitRadius);
                       }}
                     >
-                      Put the target over the path ({orbitRadius.toFixed(1)} in)
+                      Put the target over the path ({orbitRadius.toFixed(1)} mm)
                     </Button>
                   ) : null
                 }
@@ -513,9 +531,9 @@ export function CoatingApp() {
           <div className="flex min-w-0 flex-col gap-4">
             <PlaySliders
               distanceIn={sourceOffset}
-              onDistance={(inches) => {
+              onDistance={(mm) => {
                 setOffsetManual(true);
-                setSourceOffset(inches);
+                setSourceOffset(mm);
               }}
               gearing={spinRatio}
               onGearing={(turns) => {
@@ -551,16 +569,10 @@ export function CoatingApp() {
                       The full swing from thinnest to thickest is {fullSwingText}%.
                     </p>
                   ) : null}
-                  {stationaryText ? (
-                    <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-                      If the part sat still under the target, it would stay
-                      within ±{stationaryText}%.
-                    </p>
-                  ) : null}
                   <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
                     Spector quotes ±0.5% and ±0.25% with uniformity masks. This
                     number has no mask. The mask card below trims the thick parts.
-                    {focalLength !== 0 ? ` ${describeOpticSag(partDiameter, focalLength)}` : ""}
+                    {sag !== 0 ? ` ${describeOpticSag(partDiameter, sag)}` : ""}
                   </p>
                   {!profile ? (
                     <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
@@ -632,8 +644,8 @@ export function CoatingApp() {
                     Download the radial profile
                   </Button>
                   <p className="text-sm leading-snug text-muted-foreground">
-                    A CSV file: radius in inches, thickness with the part
-                    moving, and thickness if the part sat still.
+                    A CSV file: radius in millimeters and relative thickness with
+                    the part orbiting and spinning.
                   </p>
                 </div>
               </CardContent>
@@ -650,16 +662,32 @@ export function CoatingApp() {
                 sourceOffset,
                 targetDiameter,
                 throwDistance,
+                sharpness,
                 sunAngleDeg,
                 targetTiltDeg,
                 targetOscillationDeg,
                 maskOffsetIn,
-                focalLength,
+                sag,
               }}
             />
           </div>
         </div>
       </main>
+      <footer className="border-t border-border px-4 py-4 text-center text-sm text-muted-foreground sm:px-6">
+        Made by{" "}
+        <a
+          href="https://www.linkedin.com/in/colin-harthcock-18334b105"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-medium text-foreground underline-offset-4 hover:underline"
+        >
+          Colin Harthcock
+        </a>
+        <span className="mx-2 text-border" aria-hidden="true">
+          ·
+        </span>
+        Version {APP_VERSION}
+      </footer>
     </div>
   );
 }

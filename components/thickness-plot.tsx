@@ -4,7 +4,6 @@ import { useElementWidth } from "@/components/use-element-width";
 import type { RadialSample } from "@/lib/coating";
 
 const PLANETARY = "#143a66";
-const STATIONARY = "#7d8b99";
 
 type ThicknessPlotProps = {
   points: RadialSample[];
@@ -44,12 +43,11 @@ function linePath(
   points: RadialSample[],
   xOf: (radius: number) => number,
   yOf: (value: number) => number,
-  key: "planetary" | "stationary",
 ): string {
   return points
     .map((point, index) => {
       const command = index === 0 ? "M" : "L";
-      return `${command}${xOf(point.radius).toFixed(2)} ${yOf(point[key]).toFixed(2)}`;
+      return `${command}${xOf(point.radius).toFixed(2)} ${yOf(point.planetary).toFixed(2)}`;
     })
     .join(" ");
 }
@@ -64,12 +62,9 @@ export function ThicknessPlot({ points }: ThicknessPlotProps) {
   const plotWidth = Math.max(1, width - marginLeft - marginRight);
   const plotHeight = Math.max(1, height - marginTop - marginBottom);
 
-  const finite = points.filter(
-    (point) =>
-      Number.isFinite(point.planetary) && Number.isFinite(point.stationary),
-  );
+  const finite = points.filter((point) => Number.isFinite(point.planetary));
   const radii = finite.map((point) => point.radius);
-  const values = finite.flatMap((point) => [point.planetary, point.stationary]);
+  const values = finite.map((point) => point.planetary);
   const xMin = 0;
   let xMax = Math.max(1, ...radii, 0);
   let yMin = Math.min(1, ...values);
@@ -97,33 +92,15 @@ export function ThicknessPlot({ points }: ThicknessPlotProps) {
 
   return (
     <div ref={ref} className="w-full min-w-0">
-      <ul className="mb-2 flex flex-col gap-1.5 text-sm sm:flex-row sm:flex-wrap sm:gap-x-5">
-        <li className="flex items-center gap-2">
-          <span
-            className="inline-block h-0.5 w-7 rounded-full"
-            style={{ backgroundColor: PLANETARY }}
-            aria-hidden="true"
-          />
-          With the part orbiting and spinning
-        </li>
-        <li className="flex items-center gap-2 text-muted-foreground">
-          <span
-            className="inline-block h-0 w-7 border-t-2 border-dashed"
-            style={{ borderColor: STATIONARY }}
-            aria-hidden="true"
-          />
-          If the part sat still under the target
-        </li>
-      </ul>
       <p className="mb-1 text-sm text-muted-foreground">
-        Relative thickness (center = 1)
+        Relative thickness with the part orbiting and spinning (center = 1)
       </p>
       <svg
         width={width}
         height={height}
         viewBox={`0 0 ${width} ${height}`}
         role="img"
-        aria-label="Relative thickness from the center of the part to the edge. The solid blue curve is with the part orbiting and spinning. The dashed gray curve is if the part sat still under the target."
+        aria-label="Relative thickness from the center of the part to the edge with the part orbiting and spinning."
         className="block max-w-full"
       >
         {yTicks.values.map((tick) => (
@@ -177,29 +154,18 @@ export function ThicknessPlot({ points }: ThicknessPlotProps) {
           strokeWidth={1}
         />
         {finite.length > 1 ? (
-          <>
-            <path
-              d={linePath(finite, xOf, yOf, "stationary")}
-              fill="none"
-              stroke={STATIONARY}
-              strokeWidth={1.5}
-              strokeDasharray="5 4"
-              strokeLinejoin="round"
-              strokeLinecap="round"
-            />
-            <path
-              d={linePath(finite, xOf, yOf, "planetary")}
-              fill="none"
-              stroke={PLANETARY}
-              strokeWidth={2.25}
-              strokeLinejoin="round"
-              strokeLinecap="round"
-            />
-          </>
+          <path
+            d={linePath(finite, xOf, yOf)}
+            fill="none"
+            stroke={PLANETARY}
+            strokeWidth={2.25}
+            strokeLinejoin="round"
+            strokeLinecap="round"
+          />
         ) : null}
       </svg>
       <p className="text-center text-sm text-muted-foreground">
-        Distance from the center of the part (inches)
+        Distance from the center of the part (mm)
       </p>
     </div>
   );

@@ -9,6 +9,35 @@ export function roundTenth(value: number): number {
   return Number(value.toFixed(1));
 }
 
+function stepDecimals(step: number): number {
+  if (!(step > 0) || !Number.isFinite(step)) return 1;
+  const text = step.toString();
+  if (text.includes("e-") || text.includes("E-")) {
+    const exp = Number(text.split(/e-/i)[1]);
+    return Number.isFinite(exp) ? Math.min(6, Math.max(0, exp)) : 1;
+  }
+  const dot = text.indexOf(".");
+  return dot < 0 ? 0 : Math.min(6, text.length - dot - 1);
+}
+
+export function roundToStep(value: number, step: number): number {
+  if (!(step > 0) || !Number.isFinite(value)) return value;
+  const decimals = stepDecimals(step);
+  const rounded = Math.round(value / step) * step;
+  return Number(rounded.toFixed(decimals));
+}
+
+/** Digits needed so values like 304.8 mm are not shown as 305 when step is 1. */
+function displayDecimals(value: number, step: number): number {
+  const fromStep = stepDecimals(step);
+  if (!Number.isFinite(value)) return fromStep;
+  const text = value.toString();
+  if (text.includes("e") || text.includes("E")) return Math.max(fromStep, 1);
+  const dot = text.indexOf(".");
+  const fromValue = dot < 0 ? 0 : Math.min(6, text.length - dot - 1);
+  return Math.max(fromStep, fromValue);
+}
+
 type NumericControlProps = {
   id: string;
   label: string;
@@ -38,18 +67,20 @@ export function NumericControl({
   onChange,
   action,
 }: NumericControlProps) {
-  const [text, setText] = useState(() => value.toFixed(1));
+  const decimals = displayDecimals(value, step);
+  const format = (next: number) => next.toFixed(displayDecimals(next, step));
+  const [text, setText] = useState(() => format(value));
   const focused = useRef(false);
   const hintId = `${id}-hint`;
 
   useEffect(() => {
     if (!focused.current) {
-      setText(value.toFixed(1));
+      setText(format(value));
     }
-  }, [value]);
+  }, [value, step]);
 
   const commit = (next: number) => {
-    onChange(roundTenth(clamp(next, min, max)));
+    onChange(roundToStep(clamp(next, min, max), step));
   };
 
   return (
@@ -76,19 +107,23 @@ export function NumericControl({
               focused.current = false;
               const parsed = Number(text);
               if (!Number.isFinite(parsed)) {
-                setText(value.toFixed(1));
+                setText(format(value));
                 return;
               }
-              const next = roundTenth(clamp(parsed, min, max));
+              const next = roundToStep(clamp(parsed, min, max), step);
               onChange(next);
-              setText(next.toFixed(1));
+              setText(format(next));
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter") return;
+              event.currentTarget.blur();
             }}
             onChange={(event) => {
               const nextText = event.target.value;
               setText(nextText);
               const parsed = Number(nextText);
               if (!Number.isFinite(parsed) || parsed < min || parsed > max) return;
-              onChange(parsed);
+              onChange(roundToStep(parsed, step));
             }}
             className="h-9 w-[5.5rem] text-right tabular-nums"
           />
