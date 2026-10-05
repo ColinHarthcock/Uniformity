@@ -4,7 +4,7 @@ Planetary coating thickness calculator for ion-beam and electron-beam sources.
 
 ## Version
 
-The app version lives in `package.json` and is shown in the page footer (for example, Version 0.3.0). Bump it on significant changes — new physics defaults, major UI unit or mask behavior changes, or other user-visible shifts — not on every small fix.
+The app version lives in `package.json` and is shown in the page footer (for example, Version 0.3.1). Bump it on significant changes — new physics defaults, major UI unit or mask behavior changes, or other user-visible shifts — not on every small fix. Test files (`*.test.ts`) are excluded from the production TypeScript check so Vercel/`next build` does not typecheck them.
 
 ## Units
 
